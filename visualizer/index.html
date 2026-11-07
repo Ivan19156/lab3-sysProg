@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AST Visualizer — Lab 3</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #0f1117;
+    color: #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── Header ── */
+  header {
+    background: #1a1d2e;
+    border-bottom: 1px solid #2d3148;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 1rem; font-weight: 600; color: #a5b4fc; }
+  header .sub { font-size: .75rem; color: #64748b; font-family: 'Cascadia Code', 'Consolas', monospace; }
+
+  /* ── Layout ── */
+  .layout {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 290px;
+    flex-shrink: 0;
+    background: #131622;
+    border-right: 1px solid #1e2235;
+    display: flex;
+    flex-direction: column;
+    padding: 16px;
+    gap: 14px;
+    overflow-y: auto;
+  }
+
+  .sidebar label {
+    display: block;
+    font-size: .7rem;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: #64748b;
+    margin-bottom: 6px;
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 100px;
+    background: #0d0f1a;
+    border: 1px solid #2d3148;
+    border-radius: 7px;
+    color: #e2e8f0;
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-size: .78rem;
+    padding: 10px;
+    resize: vertical;
+    outline: none;
+    line-height: 1.5;
+    transition: border-color .15s;
+  }
+  textarea:focus { border-color: #818cf8; }
+
+  .btn-row { display: flex; gap: 8px; }
+  button {
+    flex: 1;
+    padding: 8px 10px;
+    border: none;
+    border-radius: 7px;
+    font-size: .82rem;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: opacity .15s;
+  }
+  button:hover { opacity: .85; }
+  .btn-primary   { background: #4f46e5; color: #fff; }
+  .btn-secondary { background: #1e2235; color: #94a3b8; border: 1px solid #2d3148; }
+
+  .examples { display: flex; flex-direction: column; gap: 6px; }
+  .ex-btn {
+    flex: none;
+    text-align: left;
+    background: #0d0f1a;
+    border: 1px solid #1e2235;
+    border-radius: 7px;
+    padding: 8px 10px;
+    cursor: pointer;
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-size: .78rem;
+    color: #e2e8f0;
+    transition: border-color .15s;
+    line-height: 1.4;
+  }
+  .ex-btn:hover { border-color: #4f46e5; }
+  .ex-btn .expr   { color: #818cf8; font-weight: 600; }
+  .ex-btn .result { color: #64748b; font-size: .72rem; }
+
+  .error {
+    background: #2d1313;
+    color: #f87171;
+    border: 1px solid #7f1d1d;
+    border-radius: 7px;
+    padding: 8px 10px;
+    font-size: .78rem;
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+  }
+
+  .legend { display: flex; flex-direction: column; gap: 5px; }
+  .legend-row { display: flex; align-items: center; gap: 8px; font-size: .78rem; color: #94a3b8; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── Canvas ── */
+  .canvas-wrap {
+    flex: 1;
+    position: relative;
+    background: #0a0c14;
+    overflow: hidden;
+  }
+  svg { width: 100%; height: 100%; display: block; }
+
+  /* ── D3 nodes ── */
+  .link { fill: none; stroke: #2d3148; stroke-width: 1.5px; }
+
+  .node.op     circle { fill: #312e81; stroke: #818cf8; stroke-width: 2px; }
+  .node.num    circle { fill: #14291f; stroke: #4ade80; stroke-width: 2px; }
+  .node.var    circle { fill: #2d1b06; stroke: #fb923c; stroke-width: 2px; }
+  .node.assign circle { fill: #2d1b06; stroke: #fb923c; stroke-width: 2px; }
+
+  .node circle:hover { stroke-width: 3px; cursor: pointer; filter: brightness(1.2); }
+
+  .node.op     text { fill: #c7d2fe; font-size: 15px; font-weight: 700; }
+  .node.num    text { fill: #86efac; font-size: 11px; font-weight: 600; }
+  .node.var    text { fill: #fdba74; font-size: 11px; font-weight: 600; }
+  .node.assign text { fill: #fdba74; font-size: 10px; font-weight: 600; }
+
+  .node text {
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    dominant-baseline: central;
+    text-anchor: middle;
+    pointer-events: none;
+  }
+  .depth-label {
+    font-size: 9px;
+    fill: #475569;
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    text-anchor: middle;
+    dominant-baseline: hanging;
+    pointer-events: none;
+  }
+
+  /* ── Tooltip ── */
+  .tooltip {
+    position: absolute;
+    background: #1e2235;
+    color: #e2e8f0;
+    border: 1px solid #2d3148;
+    font-family: 'Cascadia Code', 'Consolas', monospace;
+    font-size: .78rem;
+    padding: 6px 12px;
+    border-radius: 6px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s;
+    white-space: nowrap;
+    z-index: 10;
+  }
+
+  /* ── Empty state ── */
+  .empty {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: #334155;
+    font-size: .9rem;
+    text-align: center;
+    pointer-events: none;
+  }
+  .empty-icon { font-size: 3rem; display: block; margin-bottom: 12px; }
+
+  /* ── Controls overlay ── */
+  .controls {
+    position: absolute;
+    bottom: 16px;
+    right: 16px;
+    display: flex;
+    gap: 6px;
+  }
+  .ctrl-btn {
+    background: #1a1d2e;
+    border: 1px solid #2d3148;
+    color: #94a3b8;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: .8rem;
+    cursor: pointer;
+    flex: none;
+    font-family: inherit;
+  }
+  .ctrl-btn:hover { background: #2d3148; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🌳 AST Visualizer</h1>
+    <div class="sub">lex/yacc calculator · Lab 3 · Системне програмування</div>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+
+    <div>
+      <label>JSON з калькулятора</label>
+      <textarea id="json-input" spellcheck="false"
+        placeholder='{"name":"+","children":[{"name":"2"},{"name":"3"}]}'></textarea>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-primary"   onclick="renderFromInput()">▶ Render</button>
+      <button class="btn-secondary" onclick="fitTree()">⊡ Fit</button>
+    </div>
+
+    <div id="error-area"></div>
+
+    <div>
+      <label>Приклади</label>
+      <div class="examples">
+        <button class="ex-btn" onclick="loadExample(0)">
+          <div class="expr">(2 + 3) * 4</div>
+          <div class="result">= 20</div>
+        </button>
+        <button class="ex-btn" onclick="loadExample(1)">
+          <div class="expr">-(3 + 1) / 2</div>
+          <div class="result">= −2</div>
+        </button>
+        <button class="ex-btn" onclick="loadExample(2)">
+          <div class="expr">x = 5; x + 2</div>
+          <div class="result">assign + add</div>
+        </button>
+        <button class="ex-btn" onclick="loadExample(3)">
+          <div class="expr">a * b + c / d</div>
+          <div class="result">variables</div>
+        </button>
+        <button class="ex-btn" onclick="loadExample(4)">
+          <div class="expr">x=3; y=4-1; x*2 - y/(x+y)</div>
+          <div class="result">all operations</div>
+        </button>
+      </div>
+    </div>
+
+    <div>
+      <label>Типи вузлів</label>
+      <div class="legend">
+        <div class="legend-row">
+          <div class="dot" style="background:#818cf8"></div>
+          <span>Оператор (+, −, *, /, neg)</span>
+        </div>
+        <div class="legend-row">
+          <div class="dot" style="background:#4ade80"></div>
+          <span>Число (3, 2.5, ...)</span>
+        </div>
+        <div class="legend-row">
+          <div class="dot" style="background:#fb923c"></div>
+          <span>Змінна / присвоєння</span>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <div class="canvas-wrap" id="canvas-wrap">
+    <svg id="tree-svg"></svg>
+    <div class="tooltip" id="tooltip"></div>
+    <div class="empty" id="empty-state">
+      <div>
+        <span class="empty-icon">🌲</span>
+        Встав JSON або обери приклад
+      </div>
+    </div>
+    <div class="controls">
+      <button class="ctrl-btn" onclick="zoomIn()">+</button>
+      <button class="ctrl-btn" onclick="zoomOut()">−</button>
+      <button class="ctrl-btn" onclick="fitTree()">Fit</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Приклади ──────────────────────────────────────────────────────────
+const EXAMPLES = [
+  {"name":"*","children":[{"name":"+","children":[{"name":"2"},{"name":"3"}]},{"name":"4"}]},
+  {"name":"/","children":[{"name":"neg","children":[{"name":"+","children":[{"name":"3"},{"name":"1"}]}]},{"name":"2"}]},
+  {"name":"+","children":[{"name":"= (x)","children":[{"name":"5"}]},{"name":"x"}]},
+  {"name":"+","children":[{"name":"*","children":[{"name":"a"},{"name":"b"}]},{"name":"/","children":[{"name":"c"},{"name":"d"}]}]},
+  {"name":"+","children":[
+    {"name":"*","children":[
+      {"name":"= (x)","children":[{"name":"3"}]},
+      {"name":"2"}
+    ]},
+    {"name":"/","children":[
+      {"name":"neg","children":[
+        {"name":"= (y)","children":[
+          {"name":"-","children":[{"name":"4"},{"name":"1"}]}
+        ]}
+      ]},
+      {"name":"+","children":[
+        {"name":"x"},
+        {"name":"y"}
+      ]}
+    ]}
+  ]}
+];
+
+
+function loadExample(i) {
+  document.getElementById('json-input').value = JSON.stringify(EXAMPLES[i], null, 2);
+  renderFromInput();
+}
+
+// ── Класифікація вузлів ───────────────────────────────────────────────
+const OPS = new Set(['+','-','*','/','neg','negate']);
+function cls(name) {
+  if (!name) return 'num';
+  if (OPS.has(name)) return 'op';
+  if (name.startsWith('= (')) return 'assign';
+  if (/^-?[0-9]/.test(name)) return 'num';
+  return 'var';
+}
+function radius(name) {
+  if (cls(name) === 'op') return 22;
+  if (name && name.length > 4) return 26;
+  return 20;
+}
+
+// ── D3 ────────────────────────────────────────────────────────────────
+let svg, g, zoomBehavior;
+
+function init() {
+  svg = d3.select('#tree-svg');
+  svg.selectAll('*').remove();
+  zoomBehavior = d3.zoom().scaleExtent([0.1, 5]).on('zoom', e => g.attr('transform', e.transform));
+  svg.call(zoomBehavior);
+  g = svg.append('g');
+}
+
+function renderTree(data) {
+  const wrap = document.getElementById('canvas-wrap');
+  const W = wrap.clientWidth || 800;
+  const H = wrap.clientHeight || 600;
+
+  svg.selectAll('*').remove();
+  g = svg.append('g');
+  svg.call(zoomBehavior);
+
+  const root = d3.hierarchy(data);
+  const nodeH = Math.max(80, Math.min(130, (H - 80) / (root.height + 1)));
+  d3.tree().nodeSize([65, nodeH])(root);
+
+  // Центрування
+  let xMin = Infinity, xMax = -Infinity;
+  root.each(d => { xMin = Math.min(xMin, d.x); xMax = Math.max(xMax, d.x); });
+  const treeW = xMax - xMin;
+  const scale = Math.min(1.0, (W - 80) / (treeW + 60), (H - 80) / (root.height * nodeH + 80));
+  const tx = W / 2 - (xMin + treeW / 2) * scale;
+  const ty = 48 * scale;
+  svg.call(zoomBehavior.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+
+  // Ребра
+  g.selectAll('.link')
+    .data(root.links())
+    .join('path')
+    .attr('class', 'link')
+    .attr('d', d3.linkVertical().x(d => d.x).y(d => d.y));
+
+  // Вузли
+  const node = g.selectAll('.node')
+    .data(root.descendants())
+    .join('g')
+    .attr('class', d => `node ${cls(d.data.name)}`)
+    .attr('transform', d => `translate(${d.x},${d.y})`);
+
+  node.append('circle')
+    .attr('r', d => radius(d.data.name))
+    .on('mouseover', (e, d) => showTip(e, d.data.name))
+    .on('mousemove', moveTip)
+    .on('mouseout',  hideTip);
+
+  node.append('text').text(d => d.data.name);
+
+  node.append('text')
+    .attr('class', 'depth-label')
+    .attr('y', d => radius(d.data.name) + 10)
+    .text(d => `d${d.depth}`);
+}
+
+function renderFromInput() {
+  const raw = document.getElementById('json-input').value.trim();
+  const errArea = document.getElementById('error-area');
+  errArea.innerHTML = '';
+  if (!raw) return;
+
+  let data;
+  try { data = JSON.parse(raw); }
+  catch(e) {
+    errArea.innerHTML = `<div class="error">JSON помилка: ${e.message}</div>`;
+    return;
+  }
+  if (!data || typeof data.name !== 'string') {
+    errArea.innerHTML = `<div class="error">Очікується {"name": "...", "children": [...]}</div>`;
+    return;
+  }
+  document.getElementById('empty-state').style.display = 'none';
+  init();
+  renderTree(data);
+}
+
+// ── Zoom ──────────────────────────────────────────────────────────────
+function fitTree() {
+  if (!svg) return;
+  const wrap = document.getElementById('canvas-wrap');
+  svg.transition().duration(400)
+     .call(zoomBehavior.transform, d3.zoomIdentity.translate(wrap.clientWidth/2, 48).scale(0.85));
+}
+function zoomIn()  { svg && svg.transition().duration(200).call(zoomBehavior.scaleBy, 1.3); }
+function zoomOut() { svg && svg.transition().duration(200).call(zoomBehavior.scaleBy, 0.77); }
+
+// ── Tooltip ───────────────────────────────────────────────────────────
+const TIP = { '+':'Addition','-':'Subtraction','*':'Multiplication','/':'Division','neg':'Unary minus' };
+function showTip(e, name) {
+  const c = cls(name);
+  const types = { op:'operator', num:'number', var:'variable', assign:'assignment' };
+  const tip = document.getElementById('tooltip');
+  tip.textContent = `${name}  ·  ${types[c]}${TIP[name] ? ' — '+TIP[name] : ''}`;
+  tip.style.opacity = '1';
+  moveTip(e);
+}
+function moveTip(e) {
+  const rect = document.getElementById('canvas-wrap').getBoundingClientRect();
+  const tip = document.getElementById('tooltip');
+  let x = e.clientX - rect.left + 14;
+  let y = e.clientY - rect.top  - 36;
+  if (x + 240 > rect.width) x -= 250;
+  tip.style.left = x + 'px';
+  tip.style.top  = y + 'px';
+}
+function hideTip() { document.getElementById('tooltip').style.opacity = '0'; }
+
+// ── Старт ─────────────────────────────────────────────────────────────
+init();
+loadExample(0);
+</script>
+</body>
+</html>
